@@ -9,6 +9,7 @@
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE TupleSections         #-}
+{-# LANGUAGE TypeApplications      #-}
 -- | Perform a build
 module Stack.Build.Execute
     ( printPlan
@@ -883,21 +884,16 @@ ensureConfig newConfigCache pkgDir ExecuteEnv {..} announce cabal cabalfp task =
         announce
         cp <- view compilerPathsL
         let (GhcPkgExe pkgPath) = cpPkg cp
-        let programNames =
+        let exes =
               case cpWhich cp of
                 Ghc ->
-                  [ "--with-ghc=" ++ toFilePath (cpCompiler cp)
-                  , "--with-ghc-pkg=" ++ toFilePath pkgPath
+                  [ "--with-ghc=" ++ toFilePath @Abs @File (cpCompiler cp)
+                  , "--with-ghc-pkg=" ++ toFilePath @Abs @File pkgPath
                   ]
-        exes <- forM programNames $ \name -> do
-            mpath <- findExecutable name
-            return $ case mpath of
-                Left _ -> []
-                Right x -> return $ concat ["--with-", name, "=", x]
         -- Configure cabal with arguments determined by
         -- Stack.Types.Build.configureOpts
         cabal KeepTHLoading $ "configure" : concat
-            [ concat exes
+            [ exes
             , dirs
             , nodirs
             ]
