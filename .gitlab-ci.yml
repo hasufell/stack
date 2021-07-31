@@ -1,0 +1,471 @@
+stages:
+  - hlint
+  - test
+  - release
+
+variables:
+  GIT_SSL_NO_VERIFY: "1"
+
+  # Commit of ghc/ci-images repository from which to pull Docker images
+  DOCKER_REV: 8d0224e6b2a08157649651e69302380b2bd24e11
+
+############################################################
+# CI Images
+############################################################
+
+.alpine:64bit:
+  image: "alpine:3.12"
+  tags:
+    - x86_64-linux
+  variables:
+    OS: "LINUX"
+    ARCH: "64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.alpine:32bit:
+  image: "i386/alpine:3.12"
+  tags:
+    - x86_64-linux
+  variables:
+    OS: "LINUX"
+    ARCH: "32"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.linux:armv7:
+  image: "registry.gitlab.haskell.org/ghc/ci-images/armv7-linux-deb10:$DOCKER_REV"
+  tags:
+    - armv7-linux
+  variables:
+    OS: "LINUX"
+    ARCH: "ARM"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.linux:aarch64:
+  image: "registry.gitlab.haskell.org/ghc/ci-images/aarch64-linux-deb10:$DOCKER_REV"
+  tags:
+    - aarch64-linux
+  variables:
+    OS: "LINUX"
+    ARCH: "ARM64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.linux:debian:
+  image: "registry.gitlab.haskell.org/ghc/ci-images/x86_64-linux-deb10:$DOCKER_REV"
+  tags:
+    - x86_64-linux
+  variables:
+    OS: "LINUX"
+    ARCH: "64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+    CROSS: ""
+
+.linux:debian:32bit:
+  image: "registry.gitlab.haskell.org/ghc/ci-images/i386-linux-deb9:$DOCKER_REV"
+  tags:
+    - x86_64-linux
+  variables:
+    OS: "LINUX"
+    ARCH: "32"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+    CROSS: ""
+
+.darwin:
+  tags:
+    - x86_64-darwin
+  variables:
+    OS: "DARWIN"
+    ARCH: "64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.darwin:aarch64:
+  tags:
+    - aarch64-darwin-m1
+  variables:
+    OS: "DARWIN"
+    ARCH: "ARM64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.freebsd:
+  tags:
+    - x86_64-freebsd
+  variables:
+    OS: "FREEBSD"
+    ARCH: "64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+.windows:
+  tags:
+    - new-x86_64-windows
+  variables:
+    OS: "WINDOWS"
+    ARCH: "64"
+    CABAL_DIR: "$CI_PROJECT_DIR/cabal"
+    STACK_ROOT: "$CI_PROJECT_DIR/sr/stack_root"
+
+
+############################################################
+# cleanups
+############################################################
+
+
+.root_cleanup:
+  after_script:
+    - bash ./.gitlab/after_script.sh
+
+
+############################################################
+# test imports
+############################################################
+
+
+.test_stack_unit:
+  script:
+    - bash ./.gitlab/script/stack_unit_test.sh
+  artifacts:
+    expire_in: 1 week
+    when: always
+    paths:
+      - $CI_PROJECT_DIR/.local/bin/
+      - dist-newstyle/cache/
+
+.test_stack_unit:linux:
+  extends:
+    - .test_stack_unit
+    - .alpine:64bit
+  before_script:
+    - ./.gitlab/before_script/linux/alpine/install_deps.sh
+
+.test_stack_unit:linux32:
+  extends:
+    - .test_stack_unit
+    - .alpine:32bit
+  before_script:
+    - ./.gitlab/before_script/linux/alpine/install_deps.sh
+
+.test_stack_unit:armv7:
+  extends:
+    - .test_stack_unit
+    - .linux:armv7
+  before_script:
+    - ./.gitlab/before_script/linux/install_deps.sh
+
+.test_stack_unit:aarch64:
+  extends:
+    - .test_stack_unit
+    - .linux:aarch64
+  before_script:
+    - ./.gitlab/before_script/linux/install_deps.sh
+
+.test_stack_unit:darwin:
+  extends:
+    - .test_stack_unit
+    - .darwin
+    - .root_cleanup
+  before_script:
+    - ./.gitlab/before_script/darwin/install_deps.sh
+
+.test_stack_unit:darwin:aarch64:
+  extends:
+    - .test_stack_unit
+    - .darwin:aarch64
+    - .root_cleanup
+  script: |
+    set -Eeuo pipefail
+    function runInNixShell() {
+      time nix-shell $CI_PROJECT_DIR/.gitlab/shell.nix \
+        -I nixpkgs=https://github.com/angerman/nixpkgs/archive/75f7281738b.tar.gz \
+        --argstr system "aarch64-darwin" \
+        --pure \
+        --keep CI_PROJECT_DIR \
+        --keep MACOSX_DEPLOYMENT_TARGET \
+        --keep OS \
+        --keep ARCH \
+        --keep CABAL_DIR \
+        --keep STACK_ROOT \
+        --keep GHC_VERSION \
+        --keep CABAL_VERSION \
+        --run "$1" 2>&1
+    }
+    runInNixShell ./.gitlab/before_script/darwin/install_deps.sh 2>&1
+    runInNixShell ./.gitlab/script/stack_unit_test.sh 2>&1
+
+.test_stack_unit:freebsd:
+  extends:
+    - .test_stack_unit
+    - .freebsd
+    - .root_cleanup
+  before_script:
+    - ./.gitlab/before_script/freebsd/install_deps.sh
+
+.test_stack_unit:windows:
+  extends:
+    - .test_stack_unit
+    - .windows
+    - .root_cleanup
+  before_script:
+    - set CABAL_DIR="$CI_PROJECT_DIR/cabal"
+    - set STACK_ROOT="$CI_PROJECT_DIR/sr/stack_root"
+    - bash ./.gitlab/before_script/windows/install_deps.sh
+
+.release_stack:
+  script:
+    - bash ./.gitlab/script/stack_release.sh
+  artifacts:
+    when: always
+    expire_in: 2 week
+    paths:
+      - $CI_PROJECT_DIR/.local/bin/
+  only:
+    - tags
+
+
+######## linux test ########
+
+test:linux:
+  stage: test
+  extends: .test_stack_unit:linux
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+  needs: []
+
+######## linux 32bit test ########
+
+test:linux:32bit:
+  stage: test
+  extends: .test_stack_unit:linux32
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.2.0.0"
+  needs: []
+
+######## arm tests ########
+
+test:linux:armv7:
+  stage: test
+  extends: .test_stack_unit:armv7
+  variables:
+    GHC_VERSION: "8.10.4"
+    CABAL_VERSION: "3.4.0.0"
+    CROSS: ""
+  when: manual
+  needs: []
+
+test:linux:aarch64:
+  stage: test
+  extends: .test_stack_unit:aarch64
+  variables:
+    GHC_VERSION: "8.10.4"
+    CABAL_VERSION: "3.4.0.0"
+    CROSS: ""
+  when: manual
+  needs: []
+
+######## darwin test ########
+
+test:mac:
+  stage: test
+  extends: .test_stack_unit:darwin
+  variables:
+    GHC_VERSION: "8.10.4"
+    CABAL_VERSION: "3.4.0.0"
+  needs: []
+
+test:mac:aarch64:
+  stage: test
+  extends: .test_stack_unit:darwin:aarch64
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+  needs: []
+  allow_failure: true
+
+
+######## freebsd test ########
+
+test:freebsd:
+  stage: test
+  extends: .test_stack_unit:freebsd
+  variables:
+    GHC_VERSION: "8.10.4"
+    CABAL_VERSION: "3.4.0.0"
+  allow_failure: true # freebsd runners are unreliable
+  when: manual
+  needs: []
+
+######## windows test ########
+
+test:windows:
+  stage: test
+  extends: .test_stack_unit:windows
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+  needs: []
+
+# test:windows:scoop:
+  # stage: test
+  # extends: .test_stack_scoop:windows
+  # needs: []
+
+######## linux release ########
+
+release:linux:64bit:
+  stage: release
+  needs: ["test:linux"]
+  extends:
+    - .linux:debian
+    - .release_stack
+  before_script:
+    - ./.gitlab/before_script/linux/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+
+
+release:linux:32bit:
+  stage: release
+  needs: ["test:linux:32bit"]
+  extends:
+    - .linux:debian:32bit
+    - .release_stack
+  before_script:
+    - ./.gitlab/before_script/linux/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+
+release:linux:armv7:
+  stage: release
+  needs: ["test:linux:armv7"]
+  extends:
+    - .linux:armv7
+    - .release_stack
+  before_script:
+    - ./.gitlab/before_script/linux/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.4"
+    CABAL_VERSION: "3.4.0.0"
+    CROSS: ""
+
+release:linux:aarch64:
+  stage: release
+  needs: ["test:linux:aarch64"]
+  extends:
+    - .linux:aarch64
+    - .release_stack
+  before_script:
+    - ./.gitlab/before_script/linux/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.4"
+    CABAL_VERSION: "3.4.0.0"
+    CROSS: ""
+
+######## darwin release ########
+
+release:darwin:
+  stage: release
+  needs: ["test:mac"]
+  extends:
+    - .darwin
+    - .release_stack
+    - .root_cleanup
+  before_script:
+    - ./.gitlab/before_script/darwin/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+    MACOSX_DEPLOYMENT_TARGET: "10.7"
+
+release:darwin:aarch64:
+  stage: release
+  needs: ["test:mac:aarch64"]
+  extends:
+    - .darwin:aarch64
+    - .release_stack
+    - .root_cleanup
+  script: |
+    set -Eeuo pipefail
+    function runInNixShell() {
+      time nix-shell $CI_PROJECT_DIR/.gitlab/shell.nix \
+        -I nixpkgs=https://github.com/angerman/nixpkgs/archive/75f7281738b.tar.gz \
+        --argstr system "aarch64-darwin" \
+        --pure \
+        --keep CI_PROJECT_DIR \
+        --keep MACOSX_DEPLOYMENT_TARGET \
+        --keep OS \
+        --keep ARCH \
+        --keep CABAL_DIR \
+        --keep STACK_ROOT \
+        --keep GHC_VERSION \
+        --keep CABAL_VERSION \
+        --run "$1" 2>&1
+    }
+    runInNixShell ./.gitlab/before_script/darwin/install_deps.sh 2>&1
+    runInNixShell ./.gitlab/script/stack_release.sh 2>&1
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+    MACOSX_DEPLOYMENT_TARGET: "10.7"
+  allow_failure: true
+
+
+######## freebsd release ########
+
+release:freebsd:
+  stage: release
+  needs: ["test:freebsd"]
+  extends:
+    - .freebsd
+    - .release_stack
+    - .root_cleanup
+  before_script:
+    - ./.gitlab/before_script/freebsd/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+  allow_failure: true
+
+######## windows release ########
+
+release:windows:
+  stage: release
+  needs: ["test:windows"]
+  extends:
+    - .windows
+    - .release_stack
+    - .root_cleanup
+  before_script:
+    - bash ./.gitlab/before_script/windows/install_deps.sh
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+
+######## hlint ########
+
+hlint:
+  stage: hlint
+  extends:
+    - .alpine:64bit
+  before_script:
+    - ./.gitlab/before_script/linux/alpine/install_deps.sh
+  script:
+    - ./.gitlab/script/hlint.sh
+  variables:
+    GHC_VERSION: "8.10.5"
+    CABAL_VERSION: "3.4.0.0"
+  allow_failure: true
+  artifacts:
+    expire_in: 2 week
+    paths:
+      - report.html
+    when: always
