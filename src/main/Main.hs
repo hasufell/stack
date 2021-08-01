@@ -81,7 +81,6 @@ import           Stack.Types.Config
 import           Stack.Types.NamedComponent
 import           Stack.Types.SourceMap
 import           Stack.Unpack
-import           Stack.Upgrade
 import qualified Stack.Upload as Upload
 import qualified System.Directory as D
 import           System.Environment (getProgName, getArgs, withArgs)
@@ -256,10 +255,6 @@ commandLineHandler currentDir progName isInterpreter = complicatedOptions
                     "Update the package index"
                     updateCmd
                     (pure ())
-        addCommand' "upgrade"
-                    "Upgrade to the latest stack"
-                    upgradeCmd
-                    upgradeOpts
         addCommand'
             "upload"
             "Upload a package to Hackage"
@@ -604,19 +599,6 @@ unpackCmd (names, Just dstPath) = withConfig NoReexec $ do
 -- | Update the package index
 updateCmd :: () -> RIO Runner ()
 updateCmd () = withConfig NoReexec (void (updateHackageIndex Nothing))
-
-upgradeCmd :: UpgradeOpts -> RIO Runner ()
-upgradeCmd upgradeOpts' = do
-  go <- view globalOptsL
-  case globalResolver go of
-    Just _ -> do
-      logError "You cannot use the --resolver option with the upgrade command"
-      liftIO exitFailure
-    Nothing ->
-      withGlobalProject $
-      upgrade
-        maybeGitHash
-        upgradeOpts'
 
 -- | Upload to Hackage
 uploadCmd :: UploadOpts -> RIO Runner ()
