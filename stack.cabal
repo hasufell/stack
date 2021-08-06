@@ -3,11 +3,9 @@ cabal-version: 2.0
 -- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
---
--- hash: a602fe627b6dcb4f50470060f0b90cf1ee668145c6332918e48247480bb1bf8b
 
 name:           stack
-version:        2.7.3
+version:        2.7.3.1
 synopsis:       The Haskell Tool Stack
 description:    Please see the documentation at <https://docs.haskellstack.org>
                 for usage information.
