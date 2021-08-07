@@ -441,21 +441,18 @@ ensureCompilerAndMsys
   => SetupOpts
   -> RIO env (CompilerPaths, ExtraDirs)
 ensureCompilerAndMsys sopts = do
+  getSetupInfo' <- memoizeRef getSetupInfo
+  mmsys2Tool <- ensureMsys sopts getSetupInfo'
+  msysPaths <- maybe (pure Nothing) (fmap Just . extraDirs) mmsys2Tool
+
   actual <- either throwIO pure $ wantedToActual $ soptsWantedCompiler sopts
   didWarn <- warnUnsupportedCompiler $ getGhcVersion actual
 
-  getSetupInfo' <- memoizeRef getSetupInfo
-  (cp, ghcPaths) <- ensureCompiler sopts getSetupInfo'
+  (cp, ghcPaths) <- ensureCompiler sopts getSetupInfo' (maybe [] edBins msysPaths)
 
   warnUnsupportedCompilerCabal cp didWarn
 
-  mmsys2Tool <- ensureMsys sopts getSetupInfo'
-  paths <-
-    case mmsys2Tool of
-      Nothing -> pure ghcPaths
-      Just msys2Tool -> do
-        msys2Paths <- extraDirs msys2Tool
-        pure $ ghcPaths <> msys2Paths
+  let paths = maybe ghcPaths (ghcPaths <>) msysPaths
   pure (cp, paths)
 
 -- | See <https://github.com/commercialhaskell/stack/issues/4246>
@@ -601,13 +598,16 @@ ensureCompiler
   :: forall env. (HasConfig env, HasBuildConfig env, HasGHCVariant env)
   => SetupOpts
   -> Memoized SetupInfo
+  -> [Path Abs Dir]
   -> RIO env (CompilerPaths, ExtraDirs)
-ensureCompiler sopts getSetupInfo' = do
+ensureCompiler sopts getSetupInfo' extraPaths = do
     let wanted = soptsWantedCompiler sopts
     wc <- either throwIO (pure . whichCompiler) $ wantedToActual wanted
     
     hook <- ghcInstallHook
-    hookIsExecutable <- handleIO (\_ -> pure False) $ executable <$> getPermissions hook
+    hookIsExecutable <- if osIsWindows
+      then pure True  -- can't really detect executable on windows, only file extension
+      else handleIO (\_ -> pure False) $ executable <$> getPermissions hook
 
     Platform expectedArch _ <- view platformL
 
@@ -636,7 +636,7 @@ ensureCompiler sopts getSetupInfo' = do
               await
          | hookIsExecutable -> do
           -- if the hook fails, we fall through to stacks sandboxed installation
-            hookGHC <- runGHCInstallHook sopts hook
+            hookGHC <- runGHCInstallHook sopts hook extraPaths
             maybe (pure Nothing) checkCompiler hookGHC
          | otherwise -> return Nothing           
     case mcp of
@@ -654,12 +654,20 @@ runGHCInstallHook
   :: HasBuildConfig env
   => SetupOpts
   -> Path Abs File
+  -> [Path Abs Dir]
   -> RIO env (Maybe (Path Abs File))
-runGHCInstallHook sopts hook = do
+runGHCInstallHook sopts hook extraPaths = do
     logDebug "Getting hook installed compiler version"
     let wanted = soptsWantedCompiler sopts
     curEnv <- Map.fromList . map (T.pack *** T.pack) <$> liftIO getEnvironment
-    let newEnv = Map.union (wantedCompilerToEnv wanted) curEnv
+    -- on windows, both 'Path' and 'PATH' may exist
+    let curEnvNormalized = Map.foldrWithKey (\k v m -> case k of
+                                            "Path" -> Map.insert "PATH" v m
+                                            _      -> Map.insert k v m) mempty curEnv
+    newEnv <- either throwM pure
+      . augmentPathMap (toFilePath <$> extraPaths)
+      . Map.union (wantedCompilerToEnv wanted)
+      $ curEnvNormalized
     pCtx <- mkProcessContext newEnv
     (exit, out) <- withProcessContext pCtx $ proc "sh" [toFilePath hook] readProcessStdout
     case exit of
