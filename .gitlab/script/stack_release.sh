@@ -21,30 +21,30 @@ rm -r test/integration/tests/4095-utf8-pure-nix
 
 # TODO: failure unclear so far, some seem to fail due to gitlab docker env
 # being different, others may be legitimate failures
-if [ "${OS}" = "WINDOWS" ] ; then
-	rm -r test/integration/tests/3631-build-http2
-	rm -r test/integration/tests/haddock-options
-	rm -r test/integration/tests/override-compiler
-	rm -r test/integration/tests/upload
-elif [ "${OS}" = "LINUX" ] ; then
-	rm -r test/integration/tests/3997-coverage-with-cabal-3
-	rm -r test/integration/tests/4101-dependency-tree
-	rm -r test/integration/tests/sanity
-	if [ "${ARCH}" = "ARM64" ] ; then
-		rm -r test/integration/tests/internal-libraries
-	elif [ "${ARCH}" = "ARM" ] ; then
-		rm -r test/integration/tests/internal-libraries
-	fi
-elif [ "${OS}" = "DARWIN" ] ; then
-	rm -r test/integration/tests/4101-dependency-tree
-	rm -r test/integration/tests/sanity
-elif [ "${OS}" = "FREEBSD" ] ; then
-	rm -r test/integration/tests/1337-unicode-everywhere
-	rm -r test/integration/tests/4101-dependency-tree
-	rm -r test/integration/tests/4938-non-ascii-module-names
-	rm -r test/integration/tests/internal-libraries
-	rm -r test/integration/tests/sanity
-fi
+# if [ "${OS}" = "WINDOWS" ] ; then
+	# rm -r test/integration/tests/3631-build-http2
+	# rm -r test/integration/tests/haddock-options
+	# rm -r test/integration/tests/override-compiler
+	# rm -r test/integration/tests/upload
+# elif [ "${OS}" = "LINUX" ] ; then
+	# rm -r test/integration/tests/3997-coverage-with-cabal-3
+	# rm -r test/integration/tests/4101-dependency-tree
+	# rm -r test/integration/tests/sanity
+	# if [ "${ARCH}" = "ARM64" ] ; then
+		# rm -r test/integration/tests/internal-libraries
+	# elif [ "${ARCH}" = "ARM" ] ; then
+		# rm -r test/integration/tests/internal-libraries
+	# fi
+# elif [ "${OS}" = "DARWIN" ] ; then
+	# rm -r test/integration/tests/4101-dependency-tree
+	# rm -r test/integration/tests/sanity
+# elif [ "${OS}" = "FREEBSD" ] ; then
+	# rm -r test/integration/tests/1337-unicode-everywhere
+	# rm -r test/integration/tests/4101-dependency-tree
+	# rm -r test/integration/tests/4938-non-ascii-module-names
+	# rm -r test/integration/tests/internal-libraries
+	# rm -r test/integration/tests/sanity
+# fi
 
 # run the tests
 "$CI_PROJECT_DIR"/.local/bin/stack-integration-test
