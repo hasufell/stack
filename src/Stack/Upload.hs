@@ -8,8 +8,11 @@
 module Stack.Upload
     ( -- * Upload
       upload
+    , uploadWithKey
     , uploadBytes
+    , uploadBytesWithKey
     , uploadRevision
+    , uploadRevisionWithKey
       -- * Credentials
     , HackageCreds
     , loadCreds
@@ -27,7 +30,13 @@ import qualified Data.ByteString.Char8                 as S
 import qualified Data.ByteString.Lazy                  as L
 import qualified Data.Conduit.Binary                   as CB
 import qualified Data.Text                             as T
-import           Network.HTTP.StackClient              (Request, RequestBody(RequestBodyLBS), Response, withResponse, httpNoBody, getGlobalManager, getResponseStatusCode,
+import           Network.HTTP.StackClient              (Request,
+                                                        RequestBody(RequestBodyLBS),
+                                                        Response,
+                                                        withResponse,
+                                                        httpNoBody,
+                                                        getGlobalManager,
+                                                        getResponseStatusCode,
                                                         getResponseBody,
                                                         setRequestHeader,
                                                         parseRequest,
@@ -136,6 +145,9 @@ credsFile config = do
     createDirectoryIfMissing True dir
     return $ dir </> "credentials.json"
 
+addAPIKey :: String -> Request -> Request
+addAPIKey key req = setRequestHeader "Authorization" [fromString $ "X-ApiKey" ++ " " ++ key] req
+
 applyCreds :: HackageCreds -> Request -> IO Request
 applyCreds creds req0 = do
   manager <- getGlobalManager
@@ -198,6 +210,46 @@ uploadBytes baseUrl creds tarName uploadVariant bytes = do
                 printBody res
                 throwString $ "Upload failed on " ++ tarName
 
+uploadBytesWithKey :: String -- ^ Hackage base URL
+            -> String -- Hackage API key
+            -> String -- ^ tar file name
+            -> UploadVariant
+            -> L.ByteString -- ^ tar file contents
+            -> IO ()
+uploadBytesWithKey baseUrl key tarName uploadVariant bytes = do
+    let req1 = setRequestHeader "Accept" ["text/plain"]
+               (fromString $ baseUrl
+                          <> "packages/"
+                          <> case uploadVariant of
+                               Publishing -> ""
+                               Candidate -> "candidates/"
+               )
+        formData = [partFileRequestBody "package" tarName (RequestBodyLBS bytes)]
+    req2 <- formDataBody formData req1
+    let req3 = addAPIKey key req2
+    putStr $ "Uploading " ++ tarName ++ "... "
+    hFlush stdout
+    withResponse req3 $ \res ->
+        case getResponseStatusCode res of
+            200 -> putStrLn "done!"
+            401 -> do
+                putStrLn "authentication failure"
+                throwString "Authentication failure uploading to server"
+            403 -> do
+                putStrLn "forbidden upload"
+                putStrLn "Usually means: you've already uploaded this package/version combination"
+                putStrLn "Ignoring error and continuing, full message from Hackage below:\n"
+                printBody res
+            503 -> do
+                putStrLn "service unavailable"
+                putStrLn "This error some times gets sent even though the upload succeeded"
+                putStrLn "Check on Hackage to see if your pacakge is present"
+                printBody res
+            code -> do
+                putStrLn $ "unhandled status code: " ++ show code
+                printBody res
+                throwString $ "Upload failed on " ++ tarName
+
 printBody :: Response (ConduitM () S.ByteString IO ()) -> IO ()
 printBody res = runConduit $ getResponseBody res .| CB.sinkHandle stdout
 
@@ -211,6 +263,14 @@ upload :: String -- ^ Hackage base URL
        -> IO ()
 upload baseUrl creds fp uploadVariant =
   uploadBytes baseUrl creds (takeFileName fp) uploadVariant =<< L.readFile fp
+
+uploadWithKey :: String -- ^ Hackage base URL
+       -> String
+       -> FilePath
+       -> UploadVariant
+       -> IO ()
+uploadWithKey baseUrl key fp uploadVariant =
+  uploadBytesWithKey baseUrl key (takeFileName fp) uploadVariant =<< L.readFile fp
 
 uploadRevision :: String -- ^ Hackage base URL
                -> HackageCreds
@@ -232,4 +292,26 @@ uploadRevision baseUrl creds ident@(PackageIdentifier name _) cabalFile = do
     ]
     req0
   req2 <- applyCreds creds req1
+  void $ httpNoBody req2
+
+uploadRevisionWithKey :: String -- ^ Hackage base URL
+                      -> String
+                      -> PackageIdentifier
+                      -> L.ByteString
+                      -> IO ()
+uploadRevisionWithKey baseUrl key ident@(PackageIdentifier name _) cabalFile = do
+  req0 <- parseRequest $ concat
+    [ baseUrl
+    , "package/"
+    , packageIdentifierString ident
+    , "/"
+    , packageNameString name
+    , ".cabal/edit"
+    ]
+  req1 <- formDataBody
+    [ partLBS "cabalfile" cabalFile
+    , partBS "publish" "on"
+    ]
+    req0
+  let req2 = addAPIKey key req1
   void $ httpNoBody req2
