@@ -87,7 +87,7 @@ import qualified System.Directory as D
 import           System.Environment (getProgName, getArgs, lookupEnv, withArgs)
 import           System.FilePath (isValid, pathSeparator, takeDirectory)
 import qualified System.FilePath as FP
-import           System.IO (hPutStrLn, hGetEncoding, hSetEncoding)
+import           System.IO (hPutStrLn, hGetEncoding, hSetEncoding, print)
 import           System.Terminal (hIsTerminalDeviceOrMinTTY)
 
 -- | Change the character encoding of the given Handle to transliterate
@@ -657,11 +657,11 @@ uploadCmd uploadOpts = do
         let hackageUrl = T.unpack $ configHackageBaseUrl config
             uploadVariant = uoptsUploadVariant uploadOpts
 
-        hackageKey <- liftIO $ lookupEnv (T.unpack "HACKAGE_KEY")
+        hackageKey <- lookupEnv (T.unpack "HACKAGE_KEY")
 
         case hackageKey of
-            Just key -> do
-                logInfo "HACKAGE_KEY found in env, using that for credentials."
+            Just key -> liftIO $ do
+                print "Key found"
                 forM_ files $ \file -> do
                     tarFile <- resolveFile' file
                     liftIO $ do
