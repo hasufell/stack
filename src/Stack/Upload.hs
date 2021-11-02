@@ -8,11 +8,8 @@
 module Stack.Upload
     ( -- * Upload
       upload
-    , uploadWithKey
     , uploadBytes
-    , uploadBytesWithKey
     , uploadRevision
-    , uploadRevisionWithKey
       -- * Credentials
     , HackageCreds
     , loadCreds
@@ -82,40 +79,51 @@ withEnvVariable varName fromPrompt = lookupEnv (T.unpack varName) >>= maybe from
 -- Since 0.1.0.0
 loadCreds :: Config -> IO HackageCreds
 loadCreds config = do
-  fp <- credsFile config
-  elbs <- tryIO $ L.readFile fp
-  case either (const Nothing) Just elbs >>= \lbs -> (lbs, ) <$> decode' lbs of
-    Nothing -> fromPrompt fp
-    Just (lbs, mkCreds) -> do
-      -- Ensure privacy, for cleaning up old versions of Stack that
-      -- didn't do this
-      writeFilePrivate fp $ lazyByteString lbs
-
-      unless (configSaveHackageCreds config) $ do
-        putStrLn "WARNING: You've set save-hackage-creds to false"
-        putStrLn "However, credentials were found at:"
-        putStrLn $ "  " ++ fp
-      return $ mkCreds fp
-  where
-    fromPrompt fp = do
-      username <- withEnvVariable "HACKAGE_USERNAME" (prompt "Hackage username: ")
-      password <- withEnvVariable "HACKAGE_PASSWORD" (promptPassword "Hackage password: ")
+  hackageKey <- lookupEnv (T.unpack "HACKAGE_KEY")
+  case hackageKey of
+    Just key -> do
+      fp <- credsFile config
       let hc = HackageCreds
-            { hcUsername = username
-            , hcPassword = password
+            { hcUsername = ""
+            , hcPassword = fromString key
             , hcCredsFile = fp
             }
-
-      when (configSaveHackageCreds config) $ do
-        shouldSave <- promptBool $ T.pack $
-          "Save hackage credentials to file at " ++ fp ++ " [y/n]? "
-        putStrLn "NOTE: Avoid this prompt in the future by using: save-hackage-creds: false"
-        when shouldSave $ do
-          writeFilePrivate fp $ fromEncoding $ toEncoding hc
-          putStrLn "Saved!"
-          hFlush stdout
-
       return hc
+    Nothing -> do
+      fp <- credsFile config
+      elbs <- tryIO $ L.readFile fp
+      case either (const Nothing) Just elbs >>= \lbs -> (lbs, ) <$> decode' lbs of
+        Nothing -> fromPrompt fp
+        Just (lbs, mkCreds) -> do
+          -- Ensure privacy, for cleaning up old versions of Stack that
+          -- didn't do this
+          writeFilePrivate fp $ lazyByteString lbs
+
+          unless (configSaveHackageCreds config) $ do
+            putStrLn "WARNING: You've set save-hackage-creds to false"
+            putStrLn "However, credentials were found at:"
+            putStrLn $ "  " ++ fp
+          return $ mkCreds fp
+      where
+        fromPrompt fp = do
+          username <- withEnvVariable "HACKAGE_USERNAME" (prompt "Hackage username: ")
+          password <- withEnvVariable "HACKAGE_PASSWORD" (promptPassword "Hackage password: ")
+          let hc = HackageCreds
+                { hcUsername = username
+                , hcPassword = password
+                , hcCredsFile = fp
+                }
+
+          when (configSaveHackageCreds config) $ do
+            shouldSave <- promptBool $ T.pack $
+              "Save hackage credentials to file at " ++ fp ++ " [y/n]? "
+            putStrLn "NOTE: Avoid this prompt in the future by using: save-hackage-creds: false"
+            when shouldSave $ do
+              writeFilePrivate fp $ fromEncoding $ toEncoding hc
+              putStrLn "Saved!"
+              hFlush stdout
+
+          return hc
 
 -- | Write contents to a file which is always private.
 --
@@ -147,6 +155,15 @@ credsFile config = do
 
 addAPIKey :: String -> Request -> Request
 addAPIKey key req = setRequestHeader "Authorization" [fromString $ "X-ApiKey" ++ " " ++ key] req
+
+applyKeyOrCreds :: HackageCreds -> Request -> IO Request
+applyKeyOrCreds creds req0 = do
+    hackageKey <- lookupEnv (T.unpack "HACKAGE_KEY")
+    case hackageKey of
+        Just key -> do
+            putStrLn "HACKAGE_KEY found in env, using that for credentials."
+            return (addAPIKey key req0)
+        Nothing -> applyCreds creds req0
 
 applyCreds :: HackageCreds -> Request -> IO Request
 applyCreds creds req0 = do
@@ -185,7 +202,7 @@ uploadBytes baseUrl creds tarName uploadVariant bytes = do
                )
         formData = [partFileRequestBody "package" tarName (RequestBodyLBS bytes)]
     req2 <- formDataBody formData req1
-    req3 <- applyCreds creds req2
+    req3 <- applyKeyOrCreds creds req2
     putStr $ "Uploading " ++ tarName ++ "... "
     hFlush stdout
     withResponse req3 $ \res ->
@@ -194,46 +211,6 @@ uploadBytes baseUrl creds tarName uploadVariant bytes = do
             401 -> do
                 putStrLn "authentication failure"
                 handleIO (const $ return ()) (removeFile (hcCredsFile creds))
-                throwString "Authentication failure uploading to server"
-            403 -> do
-                putStrLn "forbidden upload"
-                putStrLn "Usually means: you've already uploaded this package/version combination"
-                putStrLn "Ignoring error and continuing, full message from Hackage below:\n"
-                printBody res
-            503 -> do
-                putStrLn "service unavailable"
-                putStrLn "This error some times gets sent even though the upload succeeded"
-                putStrLn "Check on Hackage to see if your pacakge is present"
-                printBody res
-            code -> do
-                putStrLn $ "unhandled status code: " ++ show code
-                printBody res
-                throwString $ "Upload failed on " ++ tarName
-
-uploadBytesWithKey :: String -- ^ Hackage base URL
-            -> String -- Hackage API key
-            -> String -- ^ tar file name
-            -> UploadVariant
-            -> L.ByteString -- ^ tar file contents
-            -> IO ()
-uploadBytesWithKey baseUrl key tarName uploadVariant bytes = do
-    let req1 = setRequestHeader "Accept" ["text/plain"]
-               (fromString $ baseUrl
-                          <> "packages/"
-                          <> case uploadVariant of
-                               Publishing -> ""
-                               Candidate -> "candidates/"
-               )
-        formData = [partFileRequestBody "package" tarName (RequestBodyLBS bytes)]
-    req2 <- formDataBody formData req1
-    let req3 = addAPIKey key req2
-    putStr $ "Uploading " ++ tarName ++ "... "
-    hFlush stdout
-    withResponse req3 $ \res ->
-        case getResponseStatusCode res of
-            200 -> putStrLn "done!"
-            401 -> do
-                putStrLn "authentication failure"
                 throwString "Authentication failure uploading to server"
             403 -> do
                 putStrLn "forbidden upload"
@@ -264,14 +241,6 @@ upload :: String -- ^ Hackage base URL
 upload baseUrl creds fp uploadVariant =
   uploadBytes baseUrl creds (takeFileName fp) uploadVariant =<< L.readFile fp
 
-uploadWithKey :: String -- ^ Hackage base URL
-       -> String
-       -> FilePath
-       -> UploadVariant
-       -> IO ()
-uploadWithKey baseUrl key fp uploadVariant =
-  uploadBytesWithKey baseUrl key (takeFileName fp) uploadVariant =<< L.readFile fp
-
 uploadRevision :: String -- ^ Hackage base URL
                -> HackageCreds
                -> PackageIdentifier
@@ -291,27 +260,5 @@ uploadRevision baseUrl creds ident@(PackageIdentifier name _) cabalFile = do
     , partBS "publish" "on"
     ]
     req0
-  req2 <- applyCreds creds req1
-  void $ httpNoBody req2
-
-uploadRevisionWithKey :: String -- ^ Hackage base URL
-                      -> String
-                      -> PackageIdentifier
-                      -> L.ByteString
-                      -> IO ()
-uploadRevisionWithKey baseUrl key ident@(PackageIdentifier name _) cabalFile = do
-  req0 <- parseRequest $ concat
-    [ baseUrl
-    , "package/"
-    , packageIdentifierString ident
-    , "/"
-    , packageNameString name
-    , ".cabal/edit"
-    ]
-  req1 <- formDataBody
-    [ partLBS "cabalfile" cabalFile
-    , partBS "publish" "on"
-    ]
-    req0
-  let req2 = addAPIKey key req1
+  req2 <- applyKeyOrCreds creds req1
   void $ httpNoBody req2

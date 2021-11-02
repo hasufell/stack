@@ -84,7 +84,7 @@ import           Stack.Unpack
 import           Stack.Upgrade
 import qualified Stack.Upload as Upload
 import qualified System.Directory as D
-import           System.Environment (getProgName, getArgs, lookupEnv, withArgs)
+import           System.Environment (getProgName, getArgs, withArgs)
 import           System.FilePath (isValid, pathSeparator, takeDirectory)
 import qualified System.FilePath as FP
 import           System.IO (hPutStrLn, hGetEncoding, hSetEncoding)
@@ -653,42 +653,23 @@ uploadCmd uploadOpts = do
                 ]
             exitFailure
         config <- view configL
-
         let hackageUrl = T.unpack $ configHackageBaseUrl config
             uploadVariant = uoptsUploadVariant uploadOpts
-
-        hackageKey <- liftIO $ lookupEnv (T.unpack "HACKAGE_KEY")
-
-        case hackageKey of
-            Just key -> do
-                logInfo "HACKAGE_KEY found in env, using that for credentials."
-                forM_ files $ \file -> do
-                    tarFile <- resolveFile' file
-                    liftIO $ do
-                        Upload.uploadWithKey hackageUrl key (toFilePath tarFile) uploadVariant
-                forM_ dirs $ \dir -> do
-                    pkgDir <- resolveDir' dir
-                    (tarName, tarBytes, mcabalRevision) <- getSDistTarball (sdoptsPvpBounds sdistOpts) pkgDir
-                    checkSDistTarball' sdistOpts tarName tarBytes
-                    liftIO $ do
-                      Upload.uploadBytesWithKey hackageUrl key tarName uploadVariant tarBytes
-                      forM_ mcabalRevision $ uncurry $ Upload.uploadRevisionWithKey hackageUrl key
-            Nothing -> do
-                getCreds <- liftIO $ memoizeRef $ Upload.loadCreds config
-                mapM_ (resolveFile' >=> checkSDistTarball sdistOpts) files
-                forM_ files $ \file -> do
-                    tarFile <- resolveFile' file
-                    liftIO $ do
-                      creds <- runMemoized getCreds
-                      Upload.upload hackageUrl creds (toFilePath tarFile) uploadVariant
-                forM_ dirs $ \dir -> do
-                    pkgDir <- resolveDir' dir
-                    (tarName, tarBytes, mcabalRevision) <- getSDistTarball (sdoptsPvpBounds sdistOpts) pkgDir
-                    checkSDistTarball' sdistOpts tarName tarBytes
-                    liftIO $ do
-                      creds <- runMemoized getCreds
-                      Upload.uploadBytes hackageUrl creds tarName uploadVariant tarBytes
-                      forM_ mcabalRevision $ uncurry $ Upload.uploadRevision hackageUrl creds
+        getCreds <- liftIO $ memoizeRef $ Upload.loadCreds config
+        mapM_ (resolveFile' >=> checkSDistTarball sdistOpts) files
+        forM_ files $ \file -> do
+            tarFile <- resolveFile' file
+            liftIO $ do
+              creds <- runMemoized getCreds
+              Upload.upload hackageUrl creds (toFilePath tarFile) uploadVariant
+        forM_ dirs $ \dir -> do
+            pkgDir <- resolveDir' dir
+            (tarName, tarBytes, mcabalRevision) <- getSDistTarball (sdoptsPvpBounds sdistOpts) pkgDir
+            checkSDistTarball' sdistOpts tarName tarBytes
+            liftIO $ do
+              creds <- runMemoized getCreds
+              Upload.uploadBytes hackageUrl creds tarName uploadVariant tarBytes
+              forM_ mcabalRevision $ uncurry $ Upload.uploadRevision hackageUrl creds
 
 sdistCmd :: SDistOpts -> RIO Runner ()
 sdistCmd sdistOpts =
