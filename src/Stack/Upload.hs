@@ -73,22 +73,25 @@ instance FromJSON (FilePath -> HackageCreds) where
 withEnvVariable :: Text -> IO Text -> IO Text
 withEnvVariable varName fromPrompt = lookupEnv (T.unpack varName) >>= maybe fromPrompt (pure . T.pack)
 
+maybeGetHackageKey :: IO (Maybe String)
+maybeGetHackageKey = lookupEnv (T.unpack "HACKAGE_KEY")
+
+getCredsWithApiKey :: String -> FilePath -> IO HackageCreds
+getCredsWithApiKey key fp = return HackageCreds {
+    hcUsername = ""
+  , hcPassword = fromString key
+  , hcCredsFile = fp
+}
+
 -- | Load Hackage credentials, either from a save file or the command
 -- line.
 --
 -- Since 0.1.0.0
 loadCreds :: Config -> IO HackageCreds
 loadCreds config = do
-  hackageKey <- lookupEnv (T.unpack "HACKAGE_KEY")
-  case hackageKey of
-    Just key -> do
-      fp <- credsFile config
-      let hc = HackageCreds
-            { hcUsername = ""
-            , hcPassword = fromString key
-            , hcCredsFile = fp
-            }
-      return hc
+  maybeHackageKey <- maybeGetHackageKey
+  case maybeHackageKey of
+    Just key -> credsFile config >>= getCredsWithApiKey key
     Nothing -> do
       fp <- credsFile config
       elbs <- tryIO $ L.readFile fp
@@ -158,8 +161,8 @@ addAPIKey key req = setRequestHeader "Authorization" [fromString $ "X-ApiKey" ++
 
 applyKeyOrCreds :: HackageCreds -> Request -> IO Request
 applyKeyOrCreds creds req0 = do
-    hackageKey <- lookupEnv (T.unpack "HACKAGE_KEY")
-    case hackageKey of
+    maybeHackageKey <- maybeGetHackageKey
+    case maybeHackageKey of
         Just key -> do
             putStrLn "HACKAGE_KEY found in env, using that for credentials."
             return (addAPIKey key req0)
