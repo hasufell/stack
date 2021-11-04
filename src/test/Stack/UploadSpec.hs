@@ -28,4 +28,7 @@ spec = do
       status <- getFileStatus fp
       (fileMode status .&. 0o777) `shouldBe` 0o600
 
+  it "Finds a HACKAGE_KEY env variable" $ do
+    maybeGetHackageKey `shouldReturn` Nothing
     setEnv "HACKAGE_KEY" "foo"
+    maybeGetHackageKey `shouldReturn` Just "foo"

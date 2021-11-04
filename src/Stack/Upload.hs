@@ -14,6 +14,8 @@ module Stack.Upload
     , HackageCreds
     , loadCreds
     , writeFilePrivate
+      -- * Internal
+    , maybeGetHackageKey
     ) where
 
 import           Stack.Prelude
