@@ -83,50 +83,53 @@ getCredsWithApiKey key fp = return HackageCreds {
   , hcCredsFile = fp
 }
 
--- | Load Hackage credentials, either from a save file or the command
--- line.
---
--- Since 0.1.0.0
 loadCreds :: Config -> IO HackageCreds
 loadCreds config = do
   maybeHackageKey <- maybeGetHackageKey
   case maybeHackageKey of
     Just key -> credsFile config >>= getCredsWithApiKey key
-    Nothing -> do
-      fp <- credsFile config
-      elbs <- tryIO $ L.readFile fp
-      case either (const Nothing) Just elbs >>= \lbs -> (lbs, ) <$> decode' lbs of
-        Nothing -> fromPrompt fp
-        Just (lbs, mkCreds) -> do
-          -- Ensure privacy, for cleaning up old versions of Stack that
-          -- didn't do this
-          writeFilePrivate fp $ lazyByteString lbs
+    Nothing -> loadUserAndPassword config
 
-          unless (configSaveHackageCreds config) $ do
-            putStrLn "WARNING: You've set save-hackage-creds to false"
-            putStrLn "However, credentials were found at:"
-            putStrLn $ "  " ++ fp
-          return $ mkCreds fp
-      where
-        fromPrompt fp = do
-          username <- withEnvVariable "HACKAGE_USERNAME" (prompt "Hackage username: ")
-          password <- withEnvVariable "HACKAGE_PASSWORD" (promptPassword "Hackage password: ")
-          let hc = HackageCreds
-                { hcUsername = username
-                , hcPassword = password
-                , hcCredsFile = fp
-                }
+-- | Load Hackage credentials, either from a save file or the command
+-- line.
+--
+-- Since 0.1.0.0
+loadUserAndPassword :: Config -> IO HackageCreds
+loadUserAndPassword config = do
+  fp <- credsFile config
+  elbs <- tryIO $ L.readFile fp
+  case either (const Nothing) Just elbs >>= \lbs -> (lbs, ) <$> decode' lbs of
+    Nothing -> fromPrompt fp
+    Just (lbs, mkCreds) -> do
+      -- Ensure privacy, for cleaning up old versions of Stack that
+      -- didn't do this
+      writeFilePrivate fp $ lazyByteString lbs
 
-          when (configSaveHackageCreds config) $ do
-            shouldSave <- promptBool $ T.pack $
-              "Save hackage credentials to file at " ++ fp ++ " [y/n]? "
-            putStrLn "NOTE: Avoid this prompt in the future by using: save-hackage-creds: false"
-            when shouldSave $ do
-              writeFilePrivate fp $ fromEncoding $ toEncoding hc
-              putStrLn "Saved!"
-              hFlush stdout
+      unless (configSaveHackageCreds config) $ do
+        putStrLn "WARNING: You've set save-hackage-creds to false"
+        putStrLn "However, credentials were found at:"
+        putStrLn $ "  " ++ fp
+      return $ mkCreds fp
+  where
+    fromPrompt fp = do
+      username <- withEnvVariable "HACKAGE_USERNAME" (prompt "Hackage username: ")
+      password <- withEnvVariable "HACKAGE_PASSWORD" (promptPassword "Hackage password: ")
+      let hc = HackageCreds
+            { hcUsername = username
+            , hcPassword = password
+            , hcCredsFile = fp
+            }
 
-          return hc
+      when (configSaveHackageCreds config) $ do
+        shouldSave <- promptBool $ T.pack $
+          "Save hackage credentials to file at " ++ fp ++ " [y/n]? "
+        putStrLn "NOTE: Avoid this prompt in the future by using: save-hackage-creds: false"
+        when shouldSave $ do
+          writeFilePrivate fp $ fromEncoding $ toEncoding hc
+          putStrLn "Saved!"
+          hFlush stdout
+
+      return hc
 
 -- | Write contents to a file which is always private.
 --
