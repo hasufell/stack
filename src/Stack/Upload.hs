@@ -89,7 +89,9 @@ loadCreds :: Config -> IO HackageCreds
 loadCreds config = do
   maybeHackageKey <- maybeGetHackageKey
   case maybeHackageKey of
-    Just key -> credsFile config >>= getCredsWithApiKey key
+    Just key -> do
+      putStrLn "HACKAGE_KEY found in env, using that for credentials."
+      credsFile config >>= getCredsWithApiKey key
     Nothing -> loadUserAndPassword config
 
 -- | Load Hackage credentials, either from a save file or the command
@@ -162,16 +164,14 @@ credsFile config = do
     return $ dir </> "credentials.json"
 
 addAPIKey :: String -> Request -> Request
-addAPIKey key req = setRequestHeader "Authorization" [fromString $ "X-ApiKey" ++ " " ++ key] req
+addAPIKey key req =
+  setRequestHeader "Authorization" [fromString $ "X-ApiKey" ++ " " ++ key] req
 
 applyKeyOrCreds :: HackageCreds -> Request -> IO Request
 applyKeyOrCreds creds req0 = do
-    maybeHackageKey <- maybeGetHackageKey
-    case maybeHackageKey of
-        Just key -> do
-            putStrLn "HACKAGE_KEY found in env, using that for credentials."
-            return (addAPIKey key req0)
-        Nothing -> applyCreds creds req0
+    case hcUsername creds of
+        "" -> return (addAPIKey (T.unpack $ hcPassword creds) req0)
+        _ -> applyCreds creds req0
 
 applyCreds :: HackageCreds -> Request -> IO Request
 applyCreds creds req0 = do
