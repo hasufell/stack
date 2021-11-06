@@ -78,8 +78,8 @@ withEnvVariable varName fromPrompt = lookupEnv (T.unpack varName) >>= maybe from
 maybeGetHackageKey :: IO (Maybe String)
 maybeGetHackageKey = lookupEnv (T.unpack "HACKAGE_KEY")
 
-getCredsWithApiKey :: String -> FilePath -> IO HackageCreds
-getCredsWithApiKey key fp = return HackageCreds {
+getCredsWithApiKey :: String -> FilePath -> HackageCreds
+getCredsWithApiKey key fp = HackageCreds {
     hcUsername = ""
   , hcPassword = fromString key
   , hcCredsFile = fp
@@ -91,7 +91,8 @@ loadCreds config = do
   case maybeHackageKey of
     Just key -> do
       putStrLn "HACKAGE_KEY found in env, using that for credentials."
-      credsFile config >>= getCredsWithApiKey key
+      fp <- credsFile config
+      return $ getCredsWithApiKey key fp
     Nothing -> loadUserAndPassword config
 
 -- | Load Hackage credentials, either from a save file or the command
